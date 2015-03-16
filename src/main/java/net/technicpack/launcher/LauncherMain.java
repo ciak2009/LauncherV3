@@ -293,7 +293,8 @@ public class LauncherMain {
 
         PackLoader packList = new PackLoader(directories, packStore, packInfoRepository);
 
-        ModpackSelector selector = new ModpackSelector(resources, packList, new SolderPackSource("http://solder.endermedia.com/api/", solder), solder, platform, platformSearch, iconRepo);
+        ModpackSelector selector = new ModpackSelector(resources, packList, new SolderPackSource("http://solder.endermedia.com/api/", solder, true), solder, platform, platformSearch, iconRepo);
+
         selector.setBorder(BorderFactory.createEmptyBorder());
         userModel.addAuthListener(selector);
 

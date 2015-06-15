@@ -257,7 +257,7 @@
                   <executable>/bin/chmod</executable>
                   <arguments>
                     <argument>755</argument>
-                    <argument>/Users/calebking/Documents/LauncherTest2/LauncherV3/src/main/app/Contents/MacOS/JavaAppLauncher</argument>
+                    <argument>/Users/calebking/Code/LauncherV3/src/main/app/Contents/MacOS/JavaAppLauncher</argument>
                   </arguments>
                 </configuration>
               </execution>

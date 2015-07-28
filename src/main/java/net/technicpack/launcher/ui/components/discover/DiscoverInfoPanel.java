@@ -76,7 +76,7 @@ public class DiscoverInfoPanel extends TiledBackground {
         this.resources = loader;
 
         if (discoverUrl == null)
-            discoverUrl = "http://enderplay.com/discover.html";
+            discoverUrl = "http://endermedia.com/discover.html";
 
         final String runnableAccessDiscover = discoverUrl;
 

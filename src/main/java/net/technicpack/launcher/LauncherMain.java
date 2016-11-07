@@ -22,6 +22,9 @@ import com.beust.jcommander.JCommander;
 import net.technicpack.autoupdate.IBuildNumber;
 import net.technicpack.autoupdate.Relauncher;
 import net.technicpack.autoupdate.http.HttpUpdateStream;
+import net.technicpack.discord.CacheDiscordApi;
+import net.technicpack.discord.HttpDiscordApi;
+import net.technicpack.discord.IDiscordApi;
 import net.technicpack.launcher.autoupdate.CommandLineBuildNumber;
 import net.technicpack.launcher.autoupdate.TechnicRelauncher;
 import net.technicpack.launcher.autoupdate.VersionFileBuildNumber;
@@ -86,6 +89,9 @@ import net.technicpack.solder.SolderPackSource;
 import net.technicpack.solder.http.HttpSolderApi;
 import net.technicpack.utilslib.OperatingSystem;
 import net.technicpack.utilslib.Utils;
+import org.apache.commons.io.FileUtils;
+import org.joda.time.DateTime;
+import sun.misc.ClassLoaderUtil;
 
 import javax.swing.*;
 import java.awt.*;
@@ -95,7 +101,13 @@ import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.net.MalformedURLException;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -237,12 +249,26 @@ public class LauncherMain {
         });
     }
 
-    private static void startLauncher(final TechnicSettings settings, StartupParameters startupParameters, LauncherDirectories directories, ResourceLoader resources, IBuildNumber buildNumber) {
+    private static void startLauncher(final TechnicSettings settings, StartupParameters startupParameters, final LauncherDirectories directories, ResourceLoader resources, IBuildNumber buildNumber) {
         UIManager.put( "ComboBox.disabledBackground", LauncherFrame.COLOR_FORMELEMENT_INTERNAL );
         UIManager.put( "ComboBox.disabledForeground", LauncherFrame.COLOR_GREY_TEXT );
-        System.setProperty("xr.load.xml-reader",  "org.ccil.cowan.tagsoup.Parser");
+        System.setProperty("xr.load.xml-reader", "org.ccil.cowan.tagsoup.Parser");
 
-        Utils.getLogger().info("OS: "+System.getProperty("os.name").toLowerCase(Locale.ENGLISH));
+        //Remove all log files older than a week
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Iterator<File> files = FileUtils.iterateFiles(new File(directories.getLauncherDirectory(), "logs"), new String[] {"log"}, false);
+                while (files.hasNext()) {
+                    File logFile = files.next();
+                    if (logFile.exists() && (new DateTime(logFile.lastModified())).isBefore(DateTime.now().minusWeeks(1))) {
+                        logFile.delete();
+                    }
+                }
+            }
+        }).start();
+
+        Utils.getLogger().info("OS: " + System.getProperty("os.name").toLowerCase(Locale.ENGLISH));
         Utils.getLogger().info("Identified as "+ OperatingSystem.getOperatingSystem().getName());
 
         final SplashScreen splash = new SplashScreen(resources.getImage("launch_splash.png"), 0);
@@ -251,6 +277,36 @@ public class LauncherMain {
         splash.pack();
         splash.setLocationRelativeTo(null);
         splash.setVisible(true);
+
+        boolean loadedAether = false;
+
+        try {
+            if (Class.forName("org.apache.maven.repository.internal.MavenRepositorySystemUtils", false, ClassLoader.getSystemClassLoader()) != null) {
+                loadedAether = true;
+            }
+        } catch (ClassNotFoundException ex) {
+            //Aether is not loaded
+        }
+
+        if (!loadedAether) {
+            File launcherAssets = new File(directories.getAssetsDirectory(), "launcher");
+
+            File aether = new File(launcherAssets, "aether-dep.jar");
+
+            try {
+                Method m = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
+                m.setAccessible(true);
+                m.invoke(ClassLoader.getSystemClassLoader(), aether.toURI().toURL());
+            } catch (NoSuchMethodException ex) {
+                ex.printStackTrace();
+            } catch (InvocationTargetException ex) {
+                ex.printStackTrace();
+            } catch (IllegalAccessException ex) {
+                ex.printStackTrace();
+            } catch (MalformedURLException ex) {
+                ex.printStackTrace();
+            }
+        }
 
         JavaVersionRepository javaVersions = new JavaVersionRepository();
         (new InstalledJavaSource()).enumerateVersions(javaVersions);
@@ -300,11 +356,14 @@ public class LauncherMain {
 
         DiscoverInfoPanel discoverInfoPanel = new DiscoverInfoPanel(resources, startupParameters.getDiscoverUrl(), platform, directories, selector);
 
-        MinecraftLauncher launcher = new MinecraftLauncher(platform, directories, userModel, settings.getClientId(), javaVersions);
+        MinecraftLauncher launcher = new MinecraftLauncher(platform, directories, userModel, javaVersions);
         ModpackInstaller modpackInstaller = new ModpackInstaller(platform, settings.getClientId());
         Installer installer = new Installer(startupParameters, mirrorStore, directories, modpackInstaller, launcher, settings, iconMapper);
 
-        final LauncherFrame frame = new LauncherFrame(resources, skinRepo, userModel, settings, selector, iconRepo, logoRepo, backgroundRepo, installer, avatarRepo, platform, directories, packStore, startupParameters, discoverInfoPanel, javaVersions, javaVersionFile, buildNumber);
+        IDiscordApi discordApi = new HttpDiscordApi("https://discordapp.com/api/");
+        discordApi = new CacheDiscordApi(discordApi, 600, 60);
+
+        final LauncherFrame frame = new LauncherFrame(resources, skinRepo, userModel, settings, selector, iconRepo, logoRepo, backgroundRepo, installer, avatarRepo, platform, directories, packStore, startupParameters, discoverInfoPanel, javaVersions, javaVersionFile, buildNumber, discordApi);
         userModel.addAuthListener(frame);
 
         ActionListener listener = new ActionListener() {
@@ -329,5 +388,7 @@ public class LauncherMain {
         });
 
         userModel.initAuth();
+
+        Utils.sendTracking("runLauncher", "run", buildNumber.getBuildNumber(), settings.getClientId());
     }
 }

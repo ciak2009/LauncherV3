@@ -22,6 +22,7 @@ import net.technicpack.autoupdate.IBuildNumber;
 import net.technicpack.launcher.LauncherMain;
 import net.technicpack.launcher.settings.StartupParameters;
 import net.technicpack.launcher.ui.InstallerFrame;
+import net.technicpack.minecraftcore.launch.WindowType;
 import net.technicpack.ui.listitems.javaversion.Best64BitVersionItem;
 import net.technicpack.ui.listitems.javaversion.DefaultVersionItem;
 import net.technicpack.ui.listitems.javaversion.JavaVersionItem;
@@ -81,7 +82,7 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
     private final FileJavaSource fileJavaSource;
     private final IBuildNumber buildNumber;
 
-    private DocumentListener listener = new DocumentListener() {
+    private DocumentListener javaArgsListener = new DocumentListener() {
         @Override
         public void insertUpdate(DocumentEvent e) {
             changeJavaArgs();
@@ -98,6 +99,23 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
         }
     };
 
+    private DocumentListener dimensionListener = new DocumentListener() {
+        @Override
+        public void insertUpdate(DocumentEvent e) {
+            changeWindowDimensions();
+        }
+
+        @Override
+        public void removeUpdate(DocumentEvent e) {
+            changeWindowDimensions();
+        }
+
+        @Override
+        public void changedUpdate(DocumentEvent e) {
+            changeWindowDimensions();
+        }
+    };
+
     JComboBox versionSelect;
     JComboBox memSelect;
     JTextArea javaArgs;
@@ -110,6 +128,11 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
     JCheckBox launchToModpacks;
     StartupParameters params;
     Component ramWarning;
+    JCheckBox askFirstBox;
+    JComboBox useStencil;
+    JComboBox windowSelect;
+    JTextField widthInput;
+    JTextField heightInput;
 
     public OptionsDialog(final Frame owner, final TechnicSettings settings, final ResourceLoader resourceLoader, final StartupParameters params, final JavaVersionRepository javaVersions, final FileJavaSource fileJavaSource, final IBuildNumber buildNumber) {
         super(owner);
@@ -141,6 +164,11 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
     protected void changeShowConsole() {
         settings.setShowConsole(showConsole.isSelected());
         LauncherMain.consoleFrame.setVisible(showConsole.isSelected());
+        settings.save();
+    }
+
+    protected void changeAskFirst() {
+        settings.setAutoAcceptModpackRequirements(!askFirstBox.isSelected());
         settings.save();
     }
 
@@ -211,12 +239,12 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
     }
 
     protected void changeMemory() {
-        settings.setMemory(((Memory)memSelect.getSelectedItem()).getSettingsId());
+        settings.setMemory(((Memory) memSelect.getSelectedItem()).getSettingsId());
         settings.save();
     }
 
     protected void changeStream() {
-        settings.setBuildStream(((StreamItem)streamSelect.getSelectedItem()).getStream());
+        settings.setBuildStream(((StreamItem) streamSelect.getSelectedItem()).getStream());
         settings.save();
 
         if (!hasShownStreamInfo) {
@@ -227,15 +255,57 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
     }
 
     protected void changeLaunchAction() {
-        settings.setLaunchAction(((OnLaunchItem)launchSelect.getSelectedItem()).getLaunchAction());
+        settings.setLaunchAction(((OnLaunchItem) launchSelect.getSelectedItem()).getLaunchAction());
         settings.save();
     }
 
     protected void changeLanguage() {
-        settings.setLanguageCode(((LanguageItem)langSelect.getSelectedItem()).getLangCode());
+        settings.setLanguageCode(((LanguageItem) langSelect.getSelectedItem()).getLangCode());
         settings.save();
 
-        resources.setLocale(((LanguageItem)langSelect.getSelectedItem()).getLangCode());
+        resources.setLocale(((LanguageItem) langSelect.getSelectedItem()).getLangCode());
+    }
+
+    protected void changeWindowType() {
+        switch(windowSelect.getSelectedIndex()) {
+            case 0:
+                settings.setLaunchWindowType(WindowType.DEFAULT);
+                break;
+            case 1:
+                settings.setLaunchWindowType(WindowType.FULLSCREEN);
+                break;
+            case 2:
+                settings.setLaunchWindowType(WindowType.CUSTOM);
+                changeWindowDimensions();
+                break;
+        }
+
+        updateDimensionsEnabled();
+    }
+
+    protected void changeEnableStencil() {
+        settings.setUseStencilBuffer(useStencil.getSelectedIndex() == 0);
+    }
+
+    protected void changeWindowDimensions() {
+        String widthStr = widthInput.getText();
+        String heightStr = heightInput.getText();
+        int width = 800;
+        int height = 600;
+
+        try {
+            width = Integer.parseInt(widthStr);
+        } catch (NumberFormatException ex) {
+            //Not important
+        }
+
+        try {
+            height = Integer.parseInt(heightStr);
+        } catch (NumberFormatException ex) {
+            //Not important
+        }
+
+        settings.setLaunchWindowDimensions(width, height);
     }
 
     protected void reinstall() {
@@ -258,9 +328,9 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
 
     private void initControlValues() {
 
-        javaArgs.getDocument().removeDocumentListener(listener);
+        javaArgs.getDocument().removeDocumentListener(javaArgsListener);
         javaArgs.setText(settings.getJavaArgs());
-        javaArgs.getDocument().addDocumentListener(listener);
+        javaArgs.getDocument().addDocumentListener(javaArgsListener);
 
         installField.setText(settings.getTechnicRoot().getAbsolutePath());
         clientId.setText(settings.getClientId());
@@ -272,6 +342,16 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
             @Override
             public void actionPerformed(ActionEvent e) {
                 changeShowConsole();
+            }
+        });
+
+        for (ActionListener listener : askFirstBox.getActionListeners())
+            askFirstBox.removeActionListener(listener);
+        askFirstBox.setSelected(!settings.shouldAutoAcceptModpackRequirements());
+        askFirstBox.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                changeAskFirst();
             }
         });
 
@@ -394,6 +474,61 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
                 changeLanguage();
             }
         });
+
+        widthInput.getDocument().removeDocumentListener(dimensionListener);
+        heightInput.getDocument().removeDocumentListener(dimensionListener);
+        int width = settings.getCustomWidth();
+        int height = settings.getCustomHeight();
+
+        width = (width<1)?800:width;
+        height = (height<1)?600:height;
+        widthInput.setText(Integer.toString(width));
+        heightInput.setText(Integer.toString(height));
+        widthInput.getDocument().addDocumentListener(dimensionListener);
+        heightInput.getDocument().addDocumentListener(dimensionListener);
+
+        for (ActionListener listener : windowSelect.getActionListeners()) {
+            windowSelect.removeActionListener(listener);
+        }
+        windowSelect.removeAllItems();
+        windowSelect.addItem(resources.getString("launcheroptions.video.windowSize.default"));
+        windowSelect.addItem(resources.getString("launcheroptions.video.windowSize.fullscreen"));
+        windowSelect.addItem(resources.getString("launcheroptions.video.windowSize.custom"));
+        switch (settings.getLaunchWindowType()) {
+            case DEFAULT:
+                windowSelect.setSelectedIndex(0);
+                break;
+            case FULLSCREEN:
+                windowSelect.setSelectedIndex(1);
+                break;
+            case CUSTOM:
+                windowSelect.setSelectedIndex(2);
+                break;
+        }
+        windowSelect.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                changeWindowType();
+            }
+        });
+        updateDimensionsEnabled();
+
+        for (ActionListener listener : useStencil.getActionListeners()) {
+            useStencil.removeActionListener(listener);
+        }
+        useStencil.removeAllItems();
+        useStencil.addItem(resources.getString("launcheroptions.video.stencil.enabled"));
+        useStencil.addItem(resources.getString("launcheroptions.video.stencil.disabled"));
+        if (settings.shouldUseStencilBuffer())
+            useStencil.setSelectedIndex(0);
+        else
+            useStencil.setSelectedIndex(1);
+        useStencil.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                changeEnableStencil();
+            }
+        });
     }
 
     private void rebuildMemoryList() {
@@ -454,7 +589,7 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
                 toolTip.setForeground(LauncherFrame.COLOR_GREY_TEXT);
                 toolTip.setBorder(BorderFactory.createCompoundBorder(new LineBorder(LauncherFrame.COLOR_GREY_TEXT), BorderFactory.createEmptyBorder(5,5,5,5)));
                 toolTip.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 14));
-                
+
 
                 String text = null;
                 Icon icon = null;
@@ -482,7 +617,7 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
         JPanel header = new JPanel();
         header.setBackground(Color.black);
         header.setLayout(new BoxLayout(header, BoxLayout.LINE_AXIS));
-        header.setBorder(BorderFactory.createEmptyBorder(4,8,4,8));
+        header.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
         add(header, BorderLayout.PAGE_START);
 
         JLabel title = new JLabel(resources.getString("launcher.title.options"));
@@ -490,7 +625,7 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
         title.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
         title.setOpaque(false);
         title.setIcon(resources.getIcon("options_cog.png"));
-        title.setBorder(BorderFactory.createEmptyBorder(5,0,5,0));
+        title.setBorder(BorderFactory.createEmptyBorder(5, 0, 5, 0));
         header.add(title);
 
         header.add(Box.createHorizontalGlue());
@@ -528,6 +663,11 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
 
         setupJavaOptionsPanel(javaOptions);
 
+        JPanel videoOptions = new JPanel();
+        videoOptions.setBackground(LauncherFrame.COLOR_CENTRAL_BACK_OPAQUE);
+
+        setupVideoOptionsPanel(videoOptions);
+
         JPanel about = new JPanel();
         about.setBackground(LauncherFrame.COLOR_CENTRAL_BACK_OPAQUE);
 
@@ -538,6 +678,13 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
         aboutText += "<p>" + resources.getString("launcheroptions.about.summary") + "</p>";
 
         about.setLayout(new BorderLayout());
+
+        JLabel buildCtrl = new JLabel(resources.getString("launcher.build.text", buildNumber.getBuildNumber(), resources.getString("launcher.build." + settings.getBuildStream())));
+        buildCtrl.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+        buildCtrl.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 14));
+        buildCtrl.setBorder(BorderFactory.createEmptyBorder(6, 12, 6, 0));
+        about.add(buildCtrl, BorderLayout.SOUTH);
+
         JTextPane textPane = new JTextPane();
         textPane.setBorder(BorderFactory.createEmptyBorder(0, 24, 9, 24));
         textPane.setOpaque(false);
@@ -563,7 +710,9 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
 
         centerPanel.addTab(resources.getString("launcheroptions.tab.general").toUpperCase(), general);
         centerPanel.addTab(resources.getString("launcheroptions.tab.java").toUpperCase(), javaOptions);
+        centerPanel.addTab(resources.getString("launcheroptions.tab.video").toUpperCase(), videoOptions);
         centerPanel.addTab(resources.getString("launcheroptions.tab.about").toUpperCase(), about);
+        centerPanel.setFocusable(false);
     }
 
     private void setupGeneralPanel(JPanel panel) {
@@ -769,6 +918,134 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
         panel.add(openLogs, new GridBagConstraints(0, 8, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new Insets(0, 10, 10, 0), 0, 0));
     }
 
+    private void updateDimensionsEnabled() {
+        if (windowSelect.getSelectedIndex() == 2) {
+            widthInput.setEnabled(true);
+            heightInput.setEnabled(true);
+            widthInput.setForeground(LauncherFrame.COLOR_BUTTON_BLUE);
+            heightInput.setForeground(LauncherFrame.COLOR_BUTTON_BLUE);
+            widthInput.setBorder(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 8));
+            heightInput.setBorder(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 8));
+        } else {
+            widthInput.setEnabled(false);
+            heightInput.setEnabled(false);
+            widthInput.setForeground(LauncherFrame.COLOR_GREY_TEXT);
+            heightInput.setForeground(LauncherFrame.COLOR_GREY_TEXT);
+            widthInput.setBorder(new RoundBorder(LauncherFrame.COLOR_GREY_TEXT, 1, 8));
+            heightInput.setBorder(new RoundBorder(LauncherFrame.COLOR_GREY_TEXT, 1, 8));
+        }
+    }
+
+    private void setupVideoOptionsPanel(JPanel panel) {
+        panel.setLayout(new GridBagLayout());
+
+        JLabel streamLabel = new JLabel(resources.getString("launcheroptions.video.windowSize"));
+        streamLabel.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        streamLabel.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+        panel.add(streamLabel, new GridBagConstraints(0, 0, 1, 1, 0, 0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(0, 40, 0, 0), 0, 0));
+
+        windowSelect = new JComboBox();
+
+        if (System.getProperty("os.name").toLowerCase(Locale.ENGLISH).contains("mac")) {
+            windowSelect.setUI(new MetalComboBoxUI());
+        }
+
+        windowSelect.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        windowSelect.setEditable(false);
+        windowSelect.setBorder(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 10));
+        windowSelect.setForeground(LauncherFrame.COLOR_BUTTON_BLUE);
+        windowSelect.setBackground(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
+        windowSelect.setUI(new SimpleButtonComboUI(new RoundedBorderFormatter(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 0)), resources, LauncherFrame.COLOR_SCROLL_TRACK, LauncherFrame.COLOR_SCROLL_THUMB));
+        windowSelect.setFocusable(false);
+
+        Object child = windowSelect.getAccessibleContext().getAccessibleChild(0);
+        BasicComboPopup popup = (BasicComboPopup)child;
+        JList list = popup.getList();
+        list.setSelectionForeground(LauncherFrame.COLOR_BUTTON_BLUE);
+        list.setSelectionBackground(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
+        list.setBackground(LauncherFrame.COLOR_CENTRAL_BACK_OPAQUE);
+
+        panel.add(windowSelect, new GridBagConstraints(1, 0, 1, 1, 0.5f, 0, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(8, 16, 8, 16), 0, 16));
+
+        JLabel widthLabel = new JLabel(resources.getString("launcheroptions.video.windowSize.width"));
+        widthLabel.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        widthLabel.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+        panel.add(widthLabel, new GridBagConstraints(2, 0, 1, 1, 0, 0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(0, 0, 0, 0), 0, 0));
+
+        widthInput = new JTextField(3);
+        widthInput.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        widthInput.setForeground(LauncherFrame.COLOR_BLUE);
+        widthInput.setBackground(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
+        widthInput.setBorder(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 8));
+        widthInput.setCaretColor(LauncherFrame.COLOR_BLUE);
+        widthInput.setText("800");
+        panel.add(widthInput, new GridBagConstraints(3, 0, 1, 1, 0, 0, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(8, 6, 8, 16), 0, 0));
+
+        JLabel heightLabel = new JLabel(resources.getString("launcheroptions.video.windowSize.height"));
+        heightLabel.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        heightLabel.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+        panel.add(heightLabel, new GridBagConstraints(4, 0, 1, 1, 0, 0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(0, 0, 0, 0), 0, 0));
+
+        heightInput = new JTextField(3);
+        heightInput.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        heightInput.setForeground(LauncherFrame.COLOR_BLUE);
+        heightInput.setBackground(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
+        heightInput.setBorder(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 8));
+        heightInput.setCaretColor(LauncherFrame.COLOR_BLUE);
+        heightInput.setText("600");
+        panel.add(heightInput, new GridBagConstraints(5, 0, 1, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.VERTICAL, new Insets(8, 6, 8, 16), 0,0));
+
+        //Add show console field
+        JLabel useStencilField = new JLabel(resources.getString("launcheroptions.video.stencil"));
+        useStencilField.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        useStencilField.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+        panel.add(useStencilField, new GridBagConstraints(0, 1, 1, 1, 0, 0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(10, 40, 0, 0), 0, 0));
+
+        useStencil = new JComboBox();
+
+        if (System.getProperty("os.name").toLowerCase(Locale.ENGLISH).contains("mac")) {
+            useStencil.setUI(new MetalComboBoxUI());
+        }
+
+        useStencil.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        useStencil.setEditable(false);
+        useStencil.setBorder(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 10));
+        useStencil.setForeground(LauncherFrame.COLOR_BUTTON_BLUE);
+        useStencil.setBackground(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
+        useStencil.setUI(new SimpleButtonComboUI(new RoundedBorderFormatter(new RoundBorder(LauncherFrame.COLOR_BUTTON_BLUE, 1, 0)), resources, LauncherFrame.COLOR_SCROLL_TRACK, LauncherFrame.COLOR_SCROLL_THUMB));
+        useStencil.setFocusable(false);
+
+        child = useStencil.getAccessibleContext().getAccessibleChild(0);
+        popup = (BasicComboPopup)child;
+        list = popup.getList();
+        list.setSelectionForeground(LauncherFrame.COLOR_BUTTON_BLUE);
+        list.setSelectionBackground(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
+        list.setBackground(LauncherFrame.COLOR_CENTRAL_BACK_OPAQUE);
+        panel.add(useStencil, new GridBagConstraints(1, 1, 1, 1, 0.5f, 0, GridBagConstraints.WEST, GridBagConstraints.BOTH, new Insets(8, 16, 8, 16), 0, 16));
+
+        JLabel stencilInfo = new JLabel("") {
+            @Override
+            public Dimension getMaximumSize() {
+                return getMinimumSize();
+            }
+
+            @Override
+            public Dimension getPreferredSize() {
+                return getMinimumSize();
+            }
+        };
+        stencilInfo.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 12));
+        stencilInfo.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+
+        stencilInfo.setText("<html><body style=\"font-family:" + stencilInfo.getFont().getFamily() + ";color:#D0D0D0\">" + resources.getString("launcheroptions.video.stencil.info") + "</body></html>");
+
+        panel.add(stencilInfo, new GridBagConstraints(2, 1, 4, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.BOTH, new Insets(0, 0, 0, 0), 0, 0));
+
+        panel.add(Box.createHorizontalStrut(60), new GridBagConstraints(7, 1, 1, 1, 0, 0, GridBagConstraints.CENTER, GridBagConstraints.NONE, new Insets(0,0,0,0), 30,0));
+
+        panel.add(Box.createGlue(), new GridBagConstraints(0, 2, 8, 1, 1, 1, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(0,0,0,0),0,0));
+    }
+
     private void setupJavaOptionsPanel(JPanel panel) {
         panel.setLayout(new GridBagLayout());
 
@@ -859,9 +1136,24 @@ public class OptionsDialog extends LauncherDialog implements IRelocalizableResou
         javaArgs.setSelectionColor(LauncherFrame.COLOR_BUTTON_BLUE);
         javaArgs.setSelectedTextColor(LauncherFrame.COLOR_FORMELEMENT_INTERNAL);
 
-        panel.add(javaArgs, new GridBagConstraints(1, 2, 6, 2, 0, 0, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(8, 16, 64, 80), 0, 0));
+        panel.add(javaArgs, new GridBagConstraints(1, 2, 6, 2, 0, 1, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(8, 16, 6, 80), 0, 0));
 
-        panel.add(Box.createGlue(), new GridBagConstraints(4, 3, 1, 1, 1, 1, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(0,0,0,0),0,0));
+        JLabel autoApprovalLabel = new JLabel(resources.getString("launcheroptions.java.autoApprove"));
+        autoApprovalLabel.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 16));
+        autoApprovalLabel.setForeground(LauncherFrame.COLOR_WHITE_TEXT);
+        panel.add(autoApprovalLabel, new GridBagConstraints(0, 4, 1, 1, 0, 0, GridBagConstraints.EAST, GridBagConstraints.NONE, new Insets(0, 20, 0, 0), 0, 0));
+
+        askFirstBox = new JCheckBox("", false);
+        askFirstBox.setOpaque(false);
+        askFirstBox.setHorizontalAlignment(SwingConstants.RIGHT);
+        askFirstBox.setBorder(BorderFactory.createEmptyBorder());
+        askFirstBox.setIconTextGap(0);
+        askFirstBox.setSelectedIcon(resources.getIcon("checkbox_closed.png"));
+        askFirstBox.setIcon(resources.getIcon("checkbox_open.png"));
+        askFirstBox.setFocusPainted(false);
+        panel.add(askFirstBox, new GridBagConstraints(1, 4, 6, 1, 0, 0, GridBagConstraints.WEST, GridBagConstraints.NONE, new Insets(8, 16, 8, 8), 0, 0));
+
+        panel.add(Box.createGlue(), new GridBagConstraints(4, 5, 1, 1, 1, 0.5, GridBagConstraints.CENTER, GridBagConstraints.BOTH, new Insets(0,0,0,0),0,0));
     }
 
     @Override

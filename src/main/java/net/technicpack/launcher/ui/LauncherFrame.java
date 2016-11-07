@@ -19,6 +19,7 @@
 package net.technicpack.launcher.ui;
 
 import net.technicpack.autoupdate.IBuildNumber;
+import net.technicpack.discord.IDiscordApi;
 import net.technicpack.launcher.LauncherMain;
 import net.technicpack.launcher.settings.StartupParameters;
 import net.technicpack.launcher.ui.components.ModpackOptionsDialog;
@@ -30,6 +31,7 @@ import net.technicpack.platform.io.PlatformPackInfo;
 import net.technicpack.rest.RestObject;
 import net.technicpack.ui.controls.DraggableFrame;
 import net.technicpack.ui.controls.RoundedButton;
+import net.technicpack.ui.controls.SplatPane;
 import net.technicpack.ui.controls.TintablePanel;
 import net.technicpack.ui.lang.IRelocalizableResource;
 import net.technicpack.ui.lang.ResourceLoader;
@@ -105,6 +107,11 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
     public static final Color COLOR_FOOTER = new Color(27, 32, 36);
     public static final Color COLOR_SERVER = new Color(91, 192, 222);
 
+    public static final Color COLOR_REQUIREMENT_SUCCEED = new Color(94, 181, 103);
+    public static final Color COLOR_REQUIREMENT_FAIL = new Color(133, 12, 12);
+    public static final Color COLOR_REQUIREMENT_SEPARATOR = new Color(37, 44, 49);
+    public static final Color COLOR_REQUIREMENT_WARNING = new Color(230, 119, 0);
+
     public static final String TAB_DISCOVER = "discover";
     public static final String TAB_MODPACKS = "modpacks";
     public static final String TAB_NEWS = "news";
@@ -125,6 +132,7 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
     private final JavaVersionRepository javaVersions;
     private final FileJavaSource fileJavaSource;
     private final IBuildNumber buildNumber;
+    private final IDiscordApi discordApi;
 
     private ModpackOptionsDialog modpackOptionsDialog = null;
 
@@ -150,9 +158,10 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
     ModpackInfoPanel modpackPanel;
     DiscoverInfoPanel discoverInfoPanel;
 
-    public LauncherFrame(final ResourceLoader resources, final ImageRepository<IUserType> skinRepository, final UserModel userModel, final TechnicSettings settings, final ModpackSelector modpackSelector, final ImageRepository<ModpackModel> iconRepo, final ImageRepository<ModpackModel> logoRepo, final ImageRepository<ModpackModel> backgroundRepo, final Installer installer, final ImageRepository<AuthorshipInfo> avatarRepo, final IPlatformApi platformApi, final LauncherDirectories directories, final IInstalledPackRepository packRepository, final StartupParameters params, final DiscoverInfoPanel discoverInfoPanel, final JavaVersionRepository javaVersions, final FileJavaSource fileJavaSource, final IBuildNumber buildNumber) {
+    public LauncherFrame(final ResourceLoader resources, final ImageRepository<IUserType> skinRepository, final UserModel userModel, final TechnicSettings settings, final ModpackSelector modpackSelector, final ImageRepository<ModpackModel> iconRepo, final ImageRepository<ModpackModel> logoRepo, final ImageRepository<ModpackModel> backgroundRepo, final Installer installer, final ImageRepository<AuthorshipInfo> avatarRepo, final IPlatformApi platformApi, final LauncherDirectories directories, final IInstalledPackRepository packRepository, final StartupParameters params, final DiscoverInfoPanel discoverInfoPanel, final JavaVersionRepository javaVersions, final FileJavaSource fileJavaSource, final IBuildNumber buildNumber, final IDiscordApi discordApi) {
         setSize(FRAME_WIDTH, FRAME_HEIGHT);
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
+        setTitle("Technic Launcher");
 
         this.userModel = userModel;
         this.skinRepository = skinRepository;
@@ -171,6 +180,7 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
         this.fileJavaSource = fileJavaSource;
         this.javaVersions = javaVersions;
         this.buildNumber = buildNumber;
+        this.discordApi = discordApi;
 
         //Handles rebuilding the frame, so use it to build the frame in the first place
         relocalize(resources);
@@ -374,7 +384,7 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
 
     private void initComponents() {
         BorderLayout layout = new BorderLayout();
-        setLayout(layout);
+        getRootPane().getContentPane().setLayout(layout);
 
         /////////////////////////////////////////////////////////////
         //HEADER
@@ -384,7 +394,7 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
         header.setBackground(COLOR_BLUE);
         header.setForeground(COLOR_WHITE_TEXT);
         header.setBorder(BorderFactory.createEmptyBorder(0,5,0,10));
-        this.add(header, BorderLayout.PAGE_START);
+        getRootPane().getContentPane().add(header, BorderLayout.PAGE_START);
 
         ImageIcon headerIcon = resources.getIcon("platform_icon_title.png");
         JButton headerLabel = new JButton(headerIcon);
@@ -505,10 +515,10 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
         centralPanel.setBackground(COLOR_CHARCOAL);
         centralPanel.setForeground(COLOR_WHITE_TEXT);
         centralPanel.setTintColor(COLOR_CENTRAL_BACK);
-        this.add(centralPanel, BorderLayout.CENTER);
+        getRootPane().getContentPane().add(centralPanel, BorderLayout.CENTER);
         centralPanel.setLayout(new BorderLayout());
 
-        modpackPanel = new ModpackInfoPanel(resources, iconRepo, logoRepo, backgroundRepo, avatarRepo, new ActionListener() {
+        modpackPanel = new ModpackInfoPanel(resources, iconRepo, logoRepo, backgroundRepo, avatarRepo, discordApi, new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 openModpackOptions((ModpackModel)e.getSource());
@@ -613,14 +623,27 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
         installProgressPlaceholder = Box.createHorizontalGlue();
         footer.add(installProgressPlaceholder);
 
-        JLabel buildCtrl = new JLabel(resources.getString("launcher.build.text", buildNumber.getBuildNumber(), resources.getString("launcher.build." + settings.getBuildStream())));
-        buildCtrl.setForeground(COLOR_WHITE_TEXT);
-        buildCtrl.setFont(resources.getFont(ResourceLoader.FONT_OPENSANS, 14));
+        JButton buildCtrl = new JButton(resources.getIcon("apex-logo.png"));
+        buildCtrl.setBorder(BorderFactory.createEmptyBorder());
+        buildCtrl.setContentAreaFilled(false);
         buildCtrl.setHorizontalTextPosition(SwingConstants.RIGHT);
         buildCtrl.setHorizontalAlignment(SwingConstants.RIGHT);
+        buildCtrl.setFocusable(false);
+        buildCtrl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        buildCtrl.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                DesktopUtils.browseUrl("https://apexminecrafthosting.com/partners/technic");
+            }
+        });
         footer.add(buildCtrl);
 
-        this.add(footer, BorderLayout.PAGE_END);
+        getRootPane().getContentPane().add(footer, BorderLayout.PAGE_END);
+
+        if (resources.hasResource("teaser.png")) {
+            getRootPane().setGlassPane(new SplatPane(modpacksTab, resources.getIcon("teaser.png"), JLabel.SOUTH, 5, 0));
+            getRootPane().getGlassPane().setVisible(true);
+        }
     }
 
     @Override
@@ -631,8 +654,8 @@ public class LauncherFrame extends DraggableFrame implements IRelocalizableResou
         setIconImage(this.resources.getImage("icon.png"));
 
         //Wipe controls
-        this.getContentPane().removeAll();
-        this.setLayout(null);
+        getRootPane().getContentPane().removeAll();
+        getRootPane().getContentPane().setLayout(null);
 
         //Clear references to existing controls
 

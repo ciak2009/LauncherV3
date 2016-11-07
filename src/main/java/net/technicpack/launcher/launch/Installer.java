@@ -18,8 +18,11 @@
 
 package net.technicpack.launcher.launch;
 
+import net.technicpack.launcher.ui.components.FixRunDataDialog;
 import net.technicpack.launchercore.TechnicConstants;
-import net.technicpack.minecraftcore.mojang.version.CompleteVersionParser;
+import net.technicpack.launchercore.launch.java.IJavaVersion;
+import net.technicpack.launchercore.launch.java.JavaVersionRepository;
+import net.technicpack.launchercore.modpacks.RunData;
 import net.technicpack.minecraftcore.mojang.version.MojangVersion;
 import net.technicpack.minecraftcore.mojang.version.MojangVersionBuilder;
 import net.technicpack.minecraftcore.mojang.version.builder.FileVersionBuilder;
@@ -40,7 +43,7 @@ import net.technicpack.launchercore.install.ModpackInstaller;
 import net.technicpack.launchercore.install.Version;
 import net.technicpack.launchercore.install.tasks.*;
 import net.technicpack.launchercore.install.verifiers.ValidZipFileVerifier;
-import net.technicpack.launchercore.launch.LaunchOptions;
+import net.technicpack.minecraftcore.launch.LaunchOptions;
 import net.technicpack.minecraftcore.install.tasks.*;
 import net.technicpack.minecraftcore.launch.MinecraftLauncher;
 import net.technicpack.launchercore.mirror.MirrorStore;
@@ -53,7 +56,9 @@ import net.technicpack.rest.io.Modpack;
 import net.technicpack.rest.io.PackInfo;
 import net.technicpack.utilslib.Memory;
 import net.technicpack.utilslib.OperatingSystem;
+import net.technicpack.utilslib.Utils;
 
+import javax.rmi.CORBA.Util;
 import javax.swing.*;
 import java.awt.*;
 import java.io.File;
@@ -69,6 +74,8 @@ public class Installer {
     protected final StartupParameters startupParameters;
     protected final MirrorStore mirrorStore;
     protected final LauncherDirectories directories;
+    protected Object cancelLock = new Object();
+    protected boolean isCancelledByUser = false;
 
     private Thread runningThread;
     private LauncherUnhider launcherUnhider;
@@ -84,6 +91,10 @@ public class Installer {
     }
 
     public void cancel() {
+        Utils.getLogger().info("User pressed cancel button.");
+        synchronized (cancelLock) {
+            isCancelledByUser = true;
+        }
         runningThread.interrupt();
     }
 
@@ -123,7 +134,27 @@ public class Installer {
                             throw new PackNotAvailableOfflineException(pack.getDisplayName());
                         }
 
-                        long memory = Memory.getClosestAvailableMemory(Memory.getMemoryFromId(settings.getMemory()), launcher.getJavaVersions().getSelectedVersion().is64Bit()).getMemoryMB();
+                        JavaVersionRepository javaVersions = launcher.getJavaVersions();
+                        Memory memoryObj = Memory.getClosestAvailableMemory(Memory.getMemoryFromId(settings.getMemory()), javaVersions.getSelectedVersion().is64Bit());
+                        long memory = memoryObj.getMemoryMB();
+                        String versionNumber = javaVersions.getSelectedVersion().getVersionNumber();
+                        RunData data = pack.getRunData();
+
+                        if (data != null && !data.isRunDataValid(memory, versionNumber)) {
+                            FixRunDataDialog dialog = new FixRunDataDialog(frame, resources, data, javaVersions, memoryObj, !settings.shouldAutoAcceptModpackRequirements());
+                            dialog.setVisible(true);
+                            if (dialog.getResult() == FixRunDataDialog.Result.ACCEPT) {
+                                memoryObj = dialog.getRecommendedMemory();
+                                memory = memoryObj.getMemoryMB();
+                                IJavaVersion recommendedJavaVersion = dialog.getRecommendedJavaVersion();
+                                javaVersions.selectVersion(recommendedJavaVersion.getVersionNumber(), recommendedJavaVersion.is64Bit());
+
+                                if (dialog.shouldRemember()) {
+                                    settings.setAutoAcceptModpackRequirements(true);
+                                }
+                            } else
+                                return;
+                        }
 
                         LaunchAction launchAction = settings.getLaunchAction();
 
@@ -132,7 +163,7 @@ public class Installer {
                         } else
                             launcherUnhider = null;
 
-                        LaunchOptions options = new LaunchOptions(pack.getDisplayName(), packIconMapper.getImageLocation(pack).getAbsolutePath(), startupParameters.getWidth(), startupParameters.getHeight(), startupParameters.getFullscreen());
+                        LaunchOptions options = new LaunchOptions(pack.getDisplayName(), packIconMapper.getImageLocation(pack).getAbsolutePath(), settings);
                         launcher.launch(pack, memory, options, launcherUnhider, version);
 
                         if (launchAction == null || launchAction == LaunchAction.HIDE) {
@@ -151,7 +182,23 @@ public class Installer {
 
                     everythingWorked = true;
                 } catch (InterruptedException e) {
+                    boolean cancelledByUser = false;
+                    synchronized (cancelLock) {
+                        if (isCancelledByUser) {
+                            cancelledByUser = true;
+                            isCancelledByUser = false;
+                        }
+                    }
+
                     //Canceled by user
+                    if (!cancelledByUser) {
+                        if (e.getCause() != null)
+                            Utils.getLogger().info("Cancelled by exception.");
+                        else
+                            Utils.getLogger().info("Cancelled by code.");
+                        e.printStackTrace();
+                    } else
+                        Utils.getLogger().info("Cancelled by user.");
                 } catch (PackNotAvailableOfflineException e) {
                     JOptionPane.showMessageDialog(frame, e.getMessage(), resources.getString("launcher.installerror.unavailable"), JOptionPane.WARNING_MESSAGE);
                 } catch (DownloadException e) {
@@ -165,6 +212,8 @@ public class Installer {
                     JOptionPane.showMessageDialog(frame, e.getMessage(), resources.getString("launcher.installerror.title"), JOptionPane.WARNING_MESSAGE);
                 } catch (IOException e) {
                     e.printStackTrace();
+                } catch (Exception e) {
+                    e.printStackTrace();
                 } finally {
                     if (!everythingWorked || !doLaunch) {
                         EventQueue.invokeLater(new Runnable() {
@@ -176,7 +225,29 @@ public class Installer {
                     }
                 }
             }
-        });
+        }) {
+            ///Interrupt is being called from a mysterious source, so unless this is a user-initiated cancel
+            ///Let's print the stack trace of the interruptor.
+            @Override
+            public void interrupt() {
+                boolean userCancelled = false;
+                synchronized (cancelLock) {
+                    if (isCancelledByUser)
+                        userCancelled = true;
+                }
+
+                if (!userCancelled) {
+                    Utils.getLogger().info("Mysterious interruption source.");
+                    try {
+                        //I am a charlatan and a hack.
+                        throw new Exception("Grabbing stack trace- this isn't necessarily an error.");
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+                }
+                super.interrupt();
+            }
+        };
         runningThread.start();
     }
 
@@ -210,6 +281,9 @@ public class Installer {
         TaskGroup examineIndex = new TaskGroup(resources.getString("install.message.examiningindex"));
         TaskGroup verifyingAssets = new TaskGroup(resources.getString("install.message.verifyassets"));
         TaskGroup installingAssets = new TaskGroup(resources.getString("install.message.installassets"));
+        TaskGroup grabLibs = new TaskGroup(resources.getString("install.message.grablibraries"));
+        TaskGroup checkNonMavenLibs = new TaskGroup(resources.getString("install.message.nonmavenlibs"));
+        TaskGroup rundataTaskGroup = new TaskGroup(resources.getString("install.message.runData"));
 
         queue.addTask(examineModpackData);
         queue.addTask(verifyingFiles);
@@ -217,7 +291,10 @@ public class Installer {
         queue.addTask(installingMods);
         queue.addTask(checkVersionFile);
         queue.addTask(installVersionFile);
+        queue.addTask(rundataTaskGroup);
         queue.addTask(examineVersionFile);
+        queue.addTask(grabLibs);
+        queue.addTask(checkNonMavenLibs);
         queue.addTask(installingLibs);
         queue.addTask(installingMinecraft);
         queue.addTask(examineIndex);
@@ -244,8 +321,13 @@ public class Installer {
             examineModpackData.addTask(new InstallModpackTask(modpack, modpackData, verifyingFiles, downloadingMods, installingMods));
         }
 
+        if (doFullInstall)
+            rundataTaskGroup.addTask(new WriteRundataFile(modpack, modpackData));
+        else
+            rundataTaskGroup.addTask(new CheckRundataFile(modpack, modpackData, rundataTaskGroup));
+
         checkVersionFile.addTask(new VerifyVersionFilePresentTask(modpack, minecraft, versionBuilder));
-        examineVersionFile.addTask(new HandleVersionFileTask(modpack, directories, examineVersionFile, installingLibs, installingLibs, versionBuilder));
+        examineVersionFile.addTask(new HandleVersionFileTask(modpack, directories, checkNonMavenLibs, grabLibs, installingLibs, installingLibs, versionBuilder));
         examineVersionFile.addTask(new EnsureAssetsIndexTask(directories.getAssetsDirectory(), installingMinecraft, examineIndex, verifyingAssets, installingAssets, installingAssets));
 
         if (doFullInstall || (installedVersion != null && installedVersion.isLegacy()))

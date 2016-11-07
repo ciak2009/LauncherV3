@@ -19,6 +19,8 @@
 package net.technicpack.launcher.settings;
 
 import net.technicpack.launchercore.util.LaunchAction;
+import net.technicpack.minecraftcore.launch.ILaunchOptions;
+import net.technicpack.minecraftcore.launch.WindowType;
 import net.technicpack.utilslib.OperatingSystem;
 import net.technicpack.utilslib.Utils;
 import org.apache.commons.io.FileUtils;
@@ -29,7 +31,7 @@ import java.nio.charset.Charset;
 import java.util.UUID;
 import java.util.logging.Level;
 
-public class TechnicSettings {
+public class TechnicSettings implements ILaunchOptions {
     public static final String STABLE = "stable";
     public static final String BETA = "beta";
 
@@ -46,12 +48,18 @@ public class TechnicSettings {
     private int latestNewsArticle;
     private boolean launchToModpacks;
     private String javaVersion = "default";
+    private boolean autoAcceptRequirements = false;
     /**
      * 64 bit if true, 32 bit if false
      */
     private boolean javaBitness = true;
 
     private String launcherSettingsVersion = "0";
+
+    private WindowType windowType = WindowType.DEFAULT;
+    private int windowWidth = 0;
+    private int windowHeight = 0;
+    private boolean enableStencilBuffer = true;
 
     public File getFilePath() { return this.settingsFile; }
     public void setFilePath(File settingsFile) {
@@ -133,6 +141,32 @@ public class TechnicSettings {
     public void setLatestNewsArticle(int latestNewsArticle)
     {
         this.latestNewsArticle = latestNewsArticle;
+        save();
+    }
+
+    public boolean shouldAutoAcceptModpackRequirements() { return autoAcceptRequirements; }
+    public void setAutoAcceptModpackRequirements(boolean value) {
+        this.autoAcceptRequirements = value;
+        save();
+    }
+
+    public WindowType getLaunchWindowType() { return windowType; }
+    public void setLaunchWindowType(WindowType type) {
+        this.windowType = type;
+        save();
+    }
+
+    public int getCustomWidth() { return windowWidth; }
+    public int getCustomHeight() { return windowHeight; }
+    public void setLaunchWindowDimensions(int width, int height) {
+        this.windowWidth = width;
+        this.windowHeight = height;
+        save();
+    }
+
+    public boolean shouldUseStencilBuffer() { return enableStencilBuffer; }
+    public void setUseStencilBuffer(boolean stencilBuffer) {
+        this.enableStencilBuffer = stencilBuffer;
         save();
     }
 
